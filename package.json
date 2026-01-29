@@ -1,0 +1,27 @@
+{
+  "name": "reply-job",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "tsx src/ingestion/ingestionWorker.ts",
+    "build": "rm -rf dist && tsc",
+    "start": "node dist/app.js",
+    "heroku-postbuild": "npm run build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@google/genai": "^1.38.0",
+    "dotenv": "^17.2.3",
+    "pg": "^8.17.2",
+    "twilio": "^5.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.10",
+    "@types/pg": "^8.16.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
