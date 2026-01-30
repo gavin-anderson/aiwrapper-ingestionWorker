@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx src/ingestion/ingestionWorker.ts",
     "build": "rm -rf dist && tsc",
-    "start": "node dist/app.js",
+    "start": "node dist/ingestionWorker.js",
     "heroku-postbuild": "npm run build"
   },
   "keywords": [],
