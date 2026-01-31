@@ -137,3 +137,42 @@ export async function markReplyJobFailedOrDeadletter(client: PoolClient, args: {
         [args.job.id, args.attemptsAfter, args.isDead, args.delaySeconds, args.lastError]
     );
 }
+
+
+export function renderInboundTranscript(rows: InboundMessageRow[]): string {
+    return rows
+        .map((m) => `USER: ${String(m.body ?? "").trim()}`)
+        .join("\n\n");
+}
+
+
+export async function loadInboundTranscriptForConversation(
+    client: PoolClient,
+    conversationId: string
+): Promise<string> {
+    // Get user_number for this conversation (so we only pull the user's messages)
+    const convoRes = await client.query<ConversationRow>(
+        `
+    SELECT id, channel, user_number
+    FROM conversations
+    WHERE id = $1
+    `,
+        [conversationId]
+    );
+    const convo = convoRes.rows[0];
+    if (!convo) throw new Error(`Conversation not found: ${conversationId}`);
+
+    // Pull *all* inbound messages for that user in this conversation
+    const res = await client.query<InboundMessageRow>(
+        `
+    SELECT id, conversation_id, body, from_address, to_address, provider, provider_message_sid
+    FROM inbound_messages
+    WHERE conversation_id = $1
+      AND from_address = $2
+    ORDER BY created_at ASC
+    `,
+        [conversationId, convo.user_number]
+    );
+
+    return renderInboundTranscript(res.rows);
+}

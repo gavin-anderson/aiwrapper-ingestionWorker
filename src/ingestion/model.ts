@@ -10,23 +10,25 @@ const FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL ?? "gemini-1.5-flash";
 const MAX_REPLY_CHARS = parseInt(process.env.MAX_REPLY_CHARS ?? "1200", 10);
 
 export async function callModel(opts: {
-    userText: string;
     conversationId: string;
     inboundProviderSid: string;
     timeoutMs: number;
     fromAddress?: string;
+    conversationContext?: string;
 }): Promise<string> {
-    const userText = String(opts.userText ?? "").trim();
-    if (!userText) return "Send me a message and I’ll reply.";
+    const context = String(opts.conversationContext ?? "").trim();
+    if (!context) return "Send me a message and I’ll reply.";
 
     const ai = getGeminiClient();
 
     const prompt = [
         "Respond as if you are the Toronto icon Drake sending an SMS reply.",
         "Keep messages short, direct, and build a connection with the user.",
-        opts.fromAddress ? `User (${opts.fromAddress}): ${userText}` : `User: ${userText}`,
+        "",
+        context ? `Conversation so far:\n${context}` : "",
+        "",
+        "Reply as the assistant to the most recent USER message above.",
     ].join("\n");
-
     const callGemini = (model: string) =>
         ai.models.generateContent({
             model,
