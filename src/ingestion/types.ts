@@ -38,4 +38,5 @@ export type InsertOutboundParams = {
     toAddress: string;
     fromAddress: string;
     body: string;
+    provider_inbound_sid: string | null;
 };

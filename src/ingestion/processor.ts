@@ -43,6 +43,7 @@ export async function processReplyJob(job: ReplyJobRow): Promise<{
             toAddress: inbound.from_address,
             fromAddress: inbound.to_address,
             body: replyText,
+            provider_inbound_sid: inbound.provider_message_sid,
         });
 
         await markReplyJobSucceeded(client2, job.id);
