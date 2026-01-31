@@ -165,11 +165,11 @@ export async function loadInboundTranscriptForConversation(
     // Pull *all* inbound messages for that user in this conversation
     const res = await client.query<InboundMessageRow>(
         `
-    SELECT id, conversation_id, body, from_address, to_address, provider, provider_message_sid
+    SELECT id, conversation_id, body, from_address, to_address, provider, received_at
     FROM inbound_messages
     WHERE conversation_id = $1
       AND from_address = $2
-    ORDER BY created_at ASC
+    ORDER BY received_at ASC
     `,
         [conversationId, convo.user_number]
     );
