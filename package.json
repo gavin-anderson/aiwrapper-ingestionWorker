@@ -13,8 +13,8 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@google/genai": "^1.38.0",
     "dotenv": "^17.2.3",
+    "openai": "^6.17.0",
     "pg": "^8.17.2",
     "twilio": "^5.12.0"
   },

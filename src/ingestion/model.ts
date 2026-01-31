@@ -1,10 +1,10 @@
 // src/ingestion/model.ts
-import { getGeminiClient } from "../clients/geminiClient.js";
+import { getOpenAIClient } from "../clients/openaiClient.js";
 import { withRetry } from "../utils/retry.js";
 import { truncate } from "./utils.js";
 
-const PRIMARY_MODEL = process.env.GEMINI_MODEL ?? "gemini-3-flash-preview";
-const FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL ?? "gemini-1.5-flash";
+const PRIMARY_MODEL = process.env.OPENAI_MODEL ?? "gpt-5";
+const FALLBACK_MODEL = process.env.OPENAI_FALLBACK_MODEL ?? "gpt-5-mini";
 
 // Keep worker replies bounded (WhatsApp can handle longer, but keep it sane)
 const MAX_REPLY_CHARS = parseInt(process.env.MAX_REPLY_CHARS ?? "1200", 10);
@@ -19,63 +19,72 @@ export async function callModel(opts: {
     const context = String(opts.conversationContext ?? "").trim();
     if (!context) return "Send me a message and I’ll reply.";
 
-    const ai = getGeminiClient();
+    const client = getOpenAIClient();
 
-    const prompt = [
+    const instructions = [
         "Respond as if you are the Toronto icon Drake sending an SMS reply.",
         "Keep messages short, direct, and build a connection with the user.",
-        "",
+    ].join("\n");
+
+    const input = [
         context ? `Conversation so far:\n${context}` : "",
         "",
         "Reply as the assistant to the most recent USER message above.",
     ].join("\n");
-    const callGemini = (model: string) =>
-        ai.models.generateContent({
-            model,
-            contents: prompt,
-            // If your Gemini client supports AbortSignal, pass it here.
-            // signal,
-        });
 
-    // Local timeout guard. Even if the SDK doesn't support AbortSignal,
-    // Promise.race will return control to the worker so it can retry/backoff.
-    const withTimeout = async <T>(p: Promise<T>): Promise<T> => {
-        const timeout = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`Model timeout after ${opts.timeoutMs}ms`)), opts.timeoutMs)
-        );
-        return Promise.race([p, timeout]);
+    const callOpenAI = (model: string, signal?: AbortSignal) =>
+        client.responses.create({
+            model,
+            instructions,
+            input,
+            // Optional knobs:
+            // max_output_tokens: 300,
+            // temperature: 0.8,
+        }, { signal });
+
+    // Timeout guard (and actually abort the request if supported)
+    const withTimeout = async <T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+        const controller = new AbortController();
+        const t = setTimeout(() => controller.abort(), opts.timeoutMs);
+
+        try {
+            return await fn(controller.signal);
+        } finally {
+            clearTimeout(t);
+        }
     };
 
     try {
         const response = await withRetry(
-            () => withTimeout(callGemini(PRIMARY_MODEL)),
+            () => withTimeout((signal) => callOpenAI(PRIMARY_MODEL, signal)),
             { retries: 4, baseDelayMs: 350, maxDelayMs: 3500 }
         );
 
-        const reply = response?.text?.trim();
+        const reply = response?.output_text?.trim();
         if (!reply) return "I didn’t catch that — try again?";
 
         return reply.length > MAX_REPLY_CHARS ? reply.slice(0, MAX_REPLY_CHARS) + "…" : reply;
     } catch (err: any) {
-        const status = err?.status ?? err?.error?.code;
+        const status = err?.status ?? err?.response?.status;
 
         // Overloaded / rate limited: try fallback model once (also with retry)
         if (status === 503 || status === 429) {
             const response = await withRetry(
-                () => withTimeout(callGemini(FALLBACK_MODEL)),
+                () => withTimeout((signal) => callOpenAI(FALLBACK_MODEL, signal)),
                 { retries: 2, baseDelayMs: 400, maxDelayMs: 2500 }
             );
 
-            const reply = response?.text?.trim();
+            const reply = response?.output_text?.trim();
             if (!reply) return "I didn’t catch that — try again?";
 
             return reply.length > MAX_REPLY_CHARS ? reply.slice(0, MAX_REPLY_CHARS) + "…" : reply;
         }
 
         console.error(
-            `[model] Gemini error convo=${opts.conversationId} inbound=${opts.inboundProviderSid}:`,
+            `[model] OpenAI error convo=${opts.conversationId} inbound=${opts.inboundProviderSid}:`,
             truncate(err?.stack || err?.message || String(err), 1500)
         );
+
         return "I’m a bit jammed up right now — try again in a minute.";
     }
 }
