@@ -2,7 +2,7 @@
 import { getOpenAIClient } from "../clients/openaiClient.js";
 import { withRetry } from "../utils/retry.js";
 import { truncate } from "./utils.js";
-import { buildJayPrompt } from "./prompt.js";
+import { buildSlashPrompt } from "./prompt.js";
 
 const PRIMARY_MODEL = process.env.OPENAI_MODEL ?? "gpt-5";
 const FALLBACK_MODEL = process.env.OPENAI_FALLBACK_MODEL ?? "gpt-5-mini";
@@ -22,7 +22,7 @@ export async function callModel(opts: {
     const client = getOpenAIClient();
 
     // ✅ prompt builder lives in prompt.ts
-    const { instructions, input } = buildJayPrompt({ conversationContext: context });
+    const { instructions, input } = buildSlashPrompt({ conversationContext: context });
 
     const callOpenAI = (model: string, signal?: AbortSignal) =>
         client.responses.create(
