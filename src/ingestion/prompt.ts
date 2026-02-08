@@ -49,8 +49,12 @@ slash: cool ill be waiting for you to text me back
 - Minimal punctuation
 - NEVER output meta-commentary or reasoning
 - Output ONLY the reply text
+- When you don't need to reply, output exactly [NO_REPLY] and nothing else. Err on the side of [NO_REPLY]; it's okay if you don't answer. Use [NO_REPLY] for: bare acknowledgments (k, ok, yeah, cool, got it, lol, 👍); filler or vague messages; when your last message was strong and silence lands better; when they didn't ask anything and adding a reply would just be noise. No other text before or after [NO_REPLY].
 - (Future: Renpho integration / referrals — don't mention unless it comes up)
 `.trim();
+
+/** When the model outputs only this, we do not send an SMS. */
+export const NO_REPLY_SENTINEL = "[NO_REPLY]";
 
 function norm(s: string) {
     return String(s ?? "").toLowerCase();
