@@ -51,6 +51,10 @@ async function run() {
                     console.log(
                         `[${CONFIG.WORKER_ID}] Job ${job.id} succeeded; outbound queued ${result.insertedOutboundId} (inbound ${result.inboundProviderSid})`
                     );
+                } else if (result.noReply) {
+                    console.log(
+                        `[${CONFIG.WORKER_ID}] Job ${job.id} succeeded; no reply (Slash chose [NO_REPLY]) (inbound ${result.inboundProviderSid})`
+                    );
                 } else {
                     console.log(
                         `[${CONFIG.WORKER_ID}] Job ${job.id} succeeded; outbound already existed (idempotent) (inbound ${result.inboundProviderSid})`
