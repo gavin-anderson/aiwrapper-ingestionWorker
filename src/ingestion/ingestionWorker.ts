@@ -47,9 +47,9 @@ async function run() {
             try {
                 const result = await processReplyJob(job);
 
-                if (result.insertedOutboundId) {
+                if (result.insertedOutboundIds.length > 0) {
                     console.log(
-                        `[${CONFIG.WORKER_ID}] Job ${job.id} succeeded; outbound queued ${result.insertedOutboundId} (inbound ${result.inboundProviderSid})`
+                        `[${CONFIG.WORKER_ID}] Job ${job.id} succeeded; ${result.insertedOutboundIds.length} outbound message(s) queued [${result.insertedOutboundIds.join(", ")}] (inbound ${result.inboundProviderSid})`
                     );
                 } else if (result.noReply) {
                     console.log(

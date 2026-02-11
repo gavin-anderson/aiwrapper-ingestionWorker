@@ -58,4 +58,5 @@ export type InsertOutboundParams = {
     fromAddress: string;
     body: string;
     provider_inbound_sid: string | null;
+    sequenceNumber: number;
 };

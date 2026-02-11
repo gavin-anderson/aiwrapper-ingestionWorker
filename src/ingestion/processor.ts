@@ -8,7 +8,7 @@ import { CONFIG } from "./config.js";
 
 export async function processReplyJob(job: ReplyJobRow): Promise<{
     inboundProviderSid: string;
-    insertedOutboundId: string | null;
+    insertedOutboundIds: string[];
     noReply: boolean;
 }> {
     // --- READ PHASE (short) ---
@@ -39,24 +39,34 @@ export async function processReplyJob(job: ReplyJobRow): Promise<{
     try {
         await client2.query("BEGIN");
 
-        let insertedOutboundId: string | null = null;
+        const insertedOutboundIds: string[] = [];
         if (!noReply) {
-            insertedOutboundId = await insertOutboundMessage(client2, {
-                conversationId: job.conversation_id,
-                inboundMessageId: inbound.id,
-                replyJobId: job.id,
-                provider: inbound.provider,
-                toAddress: inbound.from_address,
-                fromAddress: inbound.to_address,
-                body: replyText,
-                provider_inbound_sid: inbound.provider_message_sid,
-            });
+            // Split on tab or double-newline
+            const segments = replyText
+                .split(/\t|\n\n/)
+                .map(s => s.trim())
+                .filter(s => s.length > 0);
+
+            for (let i = 0; i < segments.length; i++) {
+                const id = await insertOutboundMessage(client2, {
+                    conversationId: job.conversation_id,
+                    inboundMessageId: inbound.id,
+                    replyJobId: job.id,
+                    provider: inbound.provider,
+                    toAddress: inbound.from_address,
+                    fromAddress: inbound.to_address,
+                    body: segments[i],
+                    provider_inbound_sid: inbound.provider_message_sid,
+                    sequenceNumber: i,
+                });
+                if (id) insertedOutboundIds.push(id);
+            }
         }
 
         await markReplyJobSucceeded(client2, job.id);
         await client2.query("COMMIT");
 
-        return { inboundProviderSid: inbound.provider_message_sid, insertedOutboundId, noReply };
+        return { inboundProviderSid: inbound.provider_message_sid, insertedOutboundIds, noReply };
     } catch (e) {
         await client2.query("ROLLBACK");
         throw e;

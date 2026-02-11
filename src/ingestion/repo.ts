@@ -76,10 +76,10 @@ export async function insertOutboundMessage(
     INSERT INTO outbound_messages (
       conversation_id, inbound_message_id, reply_job_id,
       provider, to_address, from_address, body,
-      status, provider_inbound_sid
+      status, provider_inbound_sid, sequence_number
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,'pending', $8)
-    ON CONFLICT (inbound_message_id) DO NOTHING
+    VALUES ($1,$2,$3,$4,$5,$6,$7,'pending', $8, $9)
+    ON CONFLICT (inbound_message_id, sequence_number) DO NOTHING
     RETURNING id
     `,
         [
@@ -90,7 +90,8 @@ export async function insertOutboundMessage(
             params.toAddress,
             params.fromAddress,
             params.body,
-            params.provider_inbound_sid
+            params.provider_inbound_sid,
+            params.sequenceNumber
         ]
     );
     return res.rows[0]?.id ?? null;
