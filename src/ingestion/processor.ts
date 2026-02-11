@@ -3,30 +3,33 @@ import { pool } from "../db/pool.js";
 import type { ReplyJobRow } from "./types.js";
 import { callModel } from "./model.js";
 import { NO_REPLY_SENTINEL } from "./prompt.js";
-import { insertOutboundMessage, loadConversation, loadInboundMessage, markReplyJobSucceeded, loadTranscriptForConversation } from "./repo.js";
+import { insertOutboundMessage, loadConversation, loadInboundMessage, markReplyJobsSucceeded, loadTranscriptForConversation } from "./repo.js";
 import { CONFIG } from "./config.js";
 
-export async function processReplyJob(job: ReplyJobRow): Promise<{
+export async function processReplyJob(jobs: ReplyJobRow[]): Promise<{
     inboundProviderSid: string;
     insertedOutboundIds: string[];
     noReply: boolean;
 }> {
+    // Use the last job (most recent) for outbound linking
+    const lastJob = jobs[jobs.length - 1];
+
     // --- READ PHASE (short) ---
     const client1 = await pool.connect();
     let inbound: Awaited<ReturnType<typeof loadInboundMessage>>;
     let conversationContext: string;
 
     try {
-        inbound = await loadInboundMessage(client1, job.inbound_message_id);
-        conversationContext = await loadTranscriptForConversation(client1, job.conversation_id);
-        await loadConversation(client1, job.conversation_id);
+        inbound = await loadInboundMessage(client1, lastJob.inbound_message_id);
+        conversationContext = await loadTranscriptForConversation(client1, lastJob.conversation_id);
+        await loadConversation(client1, lastJob.conversation_id);
     } finally {
         client1.release();
     }
 
     // --- MODEL PHASE ---
     const replyText = await callModel({
-        conversationId: job.conversation_id,
+        conversationId: lastJob.conversation_id,
         inboundProviderSid: inbound.provider_message_sid,
         timeoutMs: CONFIG.MODEL_TIMEOUT_MS,
         conversationContext,
@@ -34,6 +37,7 @@ export async function processReplyJob(job: ReplyJobRow): Promise<{
 
     // --- WRITE PHASE (transaction) ---
     const noReply = replyText.trim() === NO_REPLY_SENTINEL;
+    const jobIds = jobs.map(j => j.id);
 
     const client2 = await pool.connect();
     try {
@@ -49,9 +53,9 @@ export async function processReplyJob(job: ReplyJobRow): Promise<{
 
             for (let i = 0; i < segments.length; i++) {
                 const id = await insertOutboundMessage(client2, {
-                    conversationId: job.conversation_id,
+                    conversationId: lastJob.conversation_id,
                     inboundMessageId: inbound.id,
-                    replyJobId: job.id,
+                    replyJobId: lastJob.id,
                     provider: inbound.provider,
                     toAddress: inbound.from_address,
                     fromAddress: inbound.to_address,
@@ -63,7 +67,7 @@ export async function processReplyJob(job: ReplyJobRow): Promise<{
             }
         }
 
-        await markReplyJobSucceeded(client2, job.id);
+        await markReplyJobsSucceeded(client2, jobIds);
         await client2.query("COMMIT");
 
         return { inboundProviderSid: inbound.provider_message_sid, insertedOutboundIds, noReply };

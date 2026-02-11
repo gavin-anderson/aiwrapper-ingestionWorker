@@ -3,7 +3,7 @@ import "dotenv/config";
 import { pool } from "../db/pool.js";
 import { CONFIG } from "./config.js";
 import { computeReplyBackoffSeconds, sleep, truncate } from "./utils.js";
-import { claimReplyJob, markReplyJobFailedOrDeadletter } from "./repo.js";
+import { claimReplyJobs, markReplyJobsFailedOrDeadletter } from "./repo.js";
 import { processReplyJob } from "./processor.js";
 
 let stopping = false;
@@ -29,51 +29,53 @@ async function run() {
         const client = await pool.connect();
         try {
             await client.query("BEGIN");
-            const job = await claimReplyJob(client, {
+            const jobs = await claimReplyJobs(client, {
                 staleLockSeconds: CONFIG.STALE_LOCK_SECONDS,
                 workerId: CONFIG.WORKER_ID,
             });
             await client.query("COMMIT");
 
-            if (!job) {
+            if (jobs.length === 0) {
                 await sleep(CONFIG.POLL_MS);
                 continue;
             }
 
+            const jobIds = jobs.map(j => j.id);
+            const lastJob = jobs[jobs.length - 1];
             console.log(
-                `[${CONFIG.WORKER_ID}] Claimed job=${job.id} convo=${job.conversation_id} inbound=${job.inbound_message_id} attempts=${job.attempts}/${job.max_attempts}`
+                `[${CONFIG.WORKER_ID}] Claimed ${jobs.length} job(s) [${jobIds.join(", ")}] convo=${lastJob.conversation_id}`
             );
 
             try {
-                const result = await processReplyJob(job);
+                const result = await processReplyJob(jobs);
 
                 if (result.insertedOutboundIds.length > 0) {
                     console.log(
-                        `[${CONFIG.WORKER_ID}] Job ${job.id} succeeded; ${result.insertedOutboundIds.length} outbound message(s) queued [${result.insertedOutboundIds.join(", ")}] (inbound ${result.inboundProviderSid})`
+                        `[${CONFIG.WORKER_ID}] Batch [${jobIds.join(", ")}] succeeded; ${result.insertedOutboundIds.length} outbound message(s) queued [${result.insertedOutboundIds.join(", ")}] (inbound ${result.inboundProviderSid})`
                     );
                 } else if (result.noReply) {
                     console.log(
-                        `[${CONFIG.WORKER_ID}] Job ${job.id} succeeded; no reply (Slash chose [NO_REPLY]) (inbound ${result.inboundProviderSid})`
+                        `[${CONFIG.WORKER_ID}] Batch [${jobIds.join(", ")}] succeeded; no reply (Slash chose [NO_REPLY]) (inbound ${result.inboundProviderSid})`
                     );
                 } else {
                     console.log(
-                        `[${CONFIG.WORKER_ID}] Job ${job.id} succeeded; outbound already existed (idempotent) (inbound ${result.inboundProviderSid})`
+                        `[${CONFIG.WORKER_ID}] Batch [${jobIds.join(", ")}] succeeded; outbound already existed (idempotent) (inbound ${result.inboundProviderSid})`
                     );
                 }
             } catch (err: any) {
                 const msg = err?.stack || err?.message || String(err);
-                console.warn(`[${CONFIG.WORKER_ID}] Job ${job.id} failed: ${truncate(msg, 800)}`);
+                console.warn(`[${CONFIG.WORKER_ID}] Batch [${jobIds.join(", ")}] failed: ${truncate(msg, 800)}`);
 
-                const attemptsAfter = job.attempts + 1;
-                const isDead = attemptsAfter >= job.max_attempts;
-                const delaySeconds = isDead ? 0 : computeReplyBackoffSeconds(attemptsAfter);
+                const maxAttempts = Math.max(...jobs.map(j => j.max_attempts));
+                const maxAttemptsAfter = Math.max(...jobs.map(j => j.attempts + 1));
+                const isDead = maxAttemptsAfter >= maxAttempts;
+                const delaySeconds = isDead ? 0 : computeReplyBackoffSeconds(maxAttemptsAfter);
 
                 const clientFail = await pool.connect();
                 try {
                     await clientFail.query("BEGIN");
-                    await markReplyJobFailedOrDeadletter(clientFail, {
-                        job,
-                        attemptsAfter,
+                    await markReplyJobsFailedOrDeadletter(clientFail, {
+                        jobs,
                         isDead,
                         delaySeconds,
                         lastError: truncate(msg, 2000),
@@ -82,7 +84,7 @@ async function run() {
                 } catch (e: any) {
                     await clientFail.query("ROLLBACK");
                     console.error(
-                        `[${CONFIG.WORKER_ID}] Failed to mark job ${job.id} failed/deadletter:`,
+                        `[${CONFIG.WORKER_ID}] Failed to mark batch [${jobIds.join(", ")}] failed/deadletter:`,
                         e?.stack || e
                     );
                 } finally {
