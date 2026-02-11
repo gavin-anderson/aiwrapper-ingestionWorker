@@ -2,11 +2,12 @@
 import type { PoolClient } from "pg";
 import type { ConversationRow, InboundMessageRow, InsertOutboundParams, ReplyJobRow, OutboundMessageRow, TimelineRow } from "./types.js";
 
-export async function claimReplyJob(client: PoolClient, args: {
+export async function claimReplyJobs(client: PoolClient, args: {
     staleLockSeconds: number;
     workerId: string;
-}): Promise<ReplyJobRow | null> {
-    const query = `
+}): Promise<ReplyJobRow[]> {
+    // Step 1: Claim the first eligible job
+    const firstQuery = `
     WITH candidate AS (
       SELECT id
       FROM reply_jobs
@@ -37,8 +38,52 @@ export async function claimReplyJob(client: PoolClient, args: {
       j.id, j.conversation_id, j.inbound_message_id, j.status,
       j.attempts, j.max_attempts, j.run_after, j.locked_at, j.locked_by, j.last_error
   `;
-    const res = await client.query<ReplyJobRow>(query, [args.staleLockSeconds, args.workerId]);
-    return res.rows[0] ?? null;
+    const firstRes = await client.query<ReplyJobRow>(firstQuery, [args.staleLockSeconds, args.workerId]);
+    const firstJob = firstRes.rows[0];
+    if (!firstJob) return [];
+
+    // Step 2: Claim all other eligible jobs for the same conversation
+    const batchQuery = `
+    WITH candidates AS (
+      SELECT id
+      FROM reply_jobs
+      WHERE
+        conversation_id = $3
+        AND id != $4
+        AND (
+          (
+            status IN ('queued','failed')
+            AND run_after <= now()
+          )
+          OR
+          (
+            status = 'processing'
+            AND locked_at IS NOT NULL
+            AND locked_at < now() - ($1::int * interval '1 second')
+          )
+        )
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE reply_jobs j
+    SET
+      status = 'processing',
+      locked_at = now(),
+      locked_by = $2,
+      updated_at = now()
+    FROM candidates
+    WHERE j.id = candidates.id
+    RETURNING
+      j.id, j.conversation_id, j.inbound_message_id, j.status,
+      j.attempts, j.max_attempts, j.run_after, j.locked_at, j.locked_by, j.last_error
+  `;
+    const batchRes = await client.query<ReplyJobRow>(batchQuery, [
+        args.staleLockSeconds,
+        args.workerId,
+        firstJob.conversation_id,
+        firstJob.id,
+    ]);
+
+    return [firstJob, ...batchRes.rows];
 }
 
 export async function loadInboundMessage(client: PoolClient, inboundId: string): Promise<InboundMessageRow> {
@@ -97,7 +142,7 @@ export async function insertOutboundMessage(
     return res.rows[0]?.id ?? null;
 }
 
-export async function markReplyJobSucceeded(client: PoolClient, jobId: string) {
+export async function markReplyJobsSucceeded(client: PoolClient, jobIds: string[]) {
     await client.query(
         `
     UPDATE reply_jobs
@@ -107,37 +152,39 @@ export async function markReplyJobSucceeded(client: PoolClient, jobId: string) {
       locked_by = NULL,
       last_error = NULL,
       updated_at = now()
-    WHERE id = $1
+    WHERE id = ANY($1)
     `,
-        [jobId]
+        [jobIds]
     );
 }
 
-export async function markReplyJobFailedOrDeadletter(client: PoolClient, args: {
-    job: ReplyJobRow;
-    attemptsAfter: number;
+export async function markReplyJobsFailedOrDeadletter(client: PoolClient, args: {
+    jobs: ReplyJobRow[];
     isDead: boolean;
     delaySeconds: number;
     lastError: string;
 }) {
-    await client.query(
-        `
-    UPDATE reply_jobs
-    SET
-      attempts = $2,
-      status = CASE WHEN $3 THEN 'deadletter' ELSE 'failed' END,
-      run_after = CASE
-        WHEN $3 THEN run_after
-        ELSE now() + make_interval(secs => $4)
-      END,
-      last_error = $5,
-      locked_at = NULL,
-      locked_by = NULL,
-      updated_at = now()
-    WHERE id = $1
-    `,
-        [args.job.id, args.attemptsAfter, args.isDead, args.delaySeconds, args.lastError]
-    );
+    for (const job of args.jobs) {
+        const attemptsAfter = job.attempts + 1;
+        await client.query(
+            `
+      UPDATE reply_jobs
+      SET
+        attempts = $2,
+        status = CASE WHEN $3 THEN 'deadletter' ELSE 'failed' END,
+        run_after = CASE
+          WHEN $3 THEN run_after
+          ELSE now() + make_interval(secs => $4)
+        END,
+        last_error = $5,
+        locked_at = NULL,
+        locked_by = NULL,
+        updated_at = now()
+      WHERE id = $1
+      `,
+            [job.id, attemptsAfter, args.isDead, args.delaySeconds, args.lastError]
+        );
+    }
 }
 
 
