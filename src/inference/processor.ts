@@ -1,12 +1,12 @@
-// src/ingestion/processor.ts
+// src/inference/processor.ts
 import { pool } from "../db/pool.js";
-import type { ReplyJobRow } from "./types.js";
+import type { InferenceJob } from "./types.js";
 import { callModel } from "./model.js";
 import { NO_REPLY_SENTINEL } from "./prompt.js";
-import { insertOutboundMessage, loadConversation, loadInboundMessage, markReplyJobsSucceeded, loadTranscriptForConversation } from "./repo.js";
+import { insertOutboundMessage, loadConversation, loadInboundMessage, markJobsSucceeded, loadTranscriptForConversation } from "./repo.js";
 import { CONFIG } from "./config.js";
 
-export async function processReplyJob(jobs: ReplyJobRow[]): Promise<{
+export async function runInference(jobs: InferenceJob[]): Promise<{
     inboundProviderSid: string;
     insertedOutboundIds: string[];
     noReply: boolean;
@@ -20,7 +20,7 @@ export async function processReplyJob(jobs: ReplyJobRow[]): Promise<{
     let conversationContext: string;
 
     try {
-        inbound = await loadInboundMessage(client1, lastJob.inbound_message_id);
+        inbound = await loadInboundMessage(client1, lastJob.id);
         conversationContext = await loadTranscriptForConversation(client1, lastJob.conversation_id);
         await loadConversation(client1, lastJob.conversation_id);
     } finally {
@@ -55,7 +55,6 @@ export async function processReplyJob(jobs: ReplyJobRow[]): Promise<{
                 const id = await insertOutboundMessage(client2, {
                     conversationId: lastJob.conversation_id,
                     inboundMessageId: inbound.id,
-                    replyJobId: lastJob.id,
                     provider: inbound.provider,
                     toAddress: inbound.from_address,
                     fromAddress: inbound.to_address,
@@ -67,7 +66,7 @@ export async function processReplyJob(jobs: ReplyJobRow[]): Promise<{
             }
         }
 
-        await markReplyJobsSucceeded(client2, jobIds);
+        await markJobsSucceeded(client2, jobIds);
         await client2.query("COMMIT");
 
         return { inboundProviderSid: inbound.provider_message_sid, insertedOutboundIds, noReply };

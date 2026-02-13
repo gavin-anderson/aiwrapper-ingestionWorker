@@ -1,6 +1,6 @@
 // src/db/pool.ts
 import { Pool } from "pg";
-import { requiredEnv } from "../ingestion/config.js";
+import { requiredEnv } from "../inference/config.js";
 
 export const pool = new Pool({
     connectionString: requiredEnv("DATABASE_URL"),

@@ -1,4 +1,4 @@
-// src/ingestion/config.ts
+// src/inference/config.ts
 import crypto from "crypto";
 
 export function requiredEnv(name: string): string {
@@ -8,7 +8,7 @@ export function requiredEnv(name: string): string {
 }
 
 export const CONFIG = {
-    WORKER_ID: process.env.WORKER_ID ?? `ingestion-worker-${crypto.randomUUID()}`,
+    WORKER_ID: process.env.WORKER_ID ?? `inference-worker-${crypto.randomUUID()}`,
     POLL_MS: parseInt(process.env.REPLY_WORKER_POLL_MS ?? "100000", 10),
     STALE_LOCK_SECONDS: parseInt(process.env.REPLY_JOB_STALE_LOCK_SECONDS ?? "120", 10),
     MODEL_TIMEOUT_MS: parseInt(process.env.MODEL_TIMEOUT_MS ?? "35000", 10),

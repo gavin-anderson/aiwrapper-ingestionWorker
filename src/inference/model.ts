@@ -1,4 +1,4 @@
-// src/ingestion/model.ts
+// src/inference/model.ts
 import { getOpenAIClient } from "../clients/openaiClient.js";
 import { withRetry } from "../utils/retry.js";
 import { truncate } from "./utils.js";

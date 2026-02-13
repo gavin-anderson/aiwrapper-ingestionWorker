@@ -1,10 +1,10 @@
-// src/ingestion/ingestionWorker.ts
+// src/inference/inferenceWorker.ts
 import "dotenv/config";
 import { pool } from "../db/pool.js";
 import { CONFIG } from "./config.js";
 import { computeReplyBackoffSeconds, sleep, truncate } from "./utils.js";
-import { claimReplyJobs, markReplyJobsFailedOrDeadletter } from "./repo.js";
-import { processReplyJob } from "./processor.js";
+import { claimJobs, markJobsFailed } from "./repo.js";
+import { runInference } from "./processor.js";
 
 let stopping = false;
 
@@ -19,7 +19,7 @@ process.on("SIGTERM", () => {
 
 async function run() {
     console.log(
-        `[${CONFIG.WORKER_ID}] ingestion-worker starting. poll=${CONFIG.POLL_MS}ms staleLock=${CONFIG.STALE_LOCK_SECONDS}s`
+        `[${CONFIG.WORKER_ID}] inference-worker starting. poll=${CONFIG.POLL_MS}ms staleLock=${CONFIG.STALE_LOCK_SECONDS}s`
     );
 
     const r = await pool.query("select now() as now");
@@ -29,7 +29,7 @@ async function run() {
         const client = await pool.connect();
         try {
             await client.query("BEGIN");
-            const jobs = await claimReplyJobs(client, {
+            const jobs = await claimJobs(client, {
                 staleLockSeconds: CONFIG.STALE_LOCK_SECONDS,
                 workerId: CONFIG.WORKER_ID,
             });
@@ -47,7 +47,7 @@ async function run() {
             );
 
             try {
-                const result = await processReplyJob(jobs);
+                const result = await runInference(jobs);
 
                 if (result.insertedOutboundIds.length > 0) {
                     console.log(
@@ -74,7 +74,7 @@ async function run() {
                 const clientFail = await pool.connect();
                 try {
                     await clientFail.query("BEGIN");
-                    await markReplyJobsFailedOrDeadletter(clientFail, {
+                    await markJobsFailed(clientFail, {
                         jobs,
                         isDead,
                         delaySeconds,

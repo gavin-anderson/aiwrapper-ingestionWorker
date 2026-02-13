@@ -1,11 +1,11 @@
 {
-  "name": "reply-job",
+  "name": "inference-worker",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev": "tsx src/ingestion/ingestionWorker.ts",
+    "dev": "tsx src/inference/inferenceWorker.ts",
     "build": "rm -rf dist && tsc",
-    "start": "node dist/src/ingestion/ingestionWorker.js",
+    "start": "node dist/src/inference/inferenceWorker.js",
     "heroku-postbuild": "npm run build"
   },
   "keywords": [],

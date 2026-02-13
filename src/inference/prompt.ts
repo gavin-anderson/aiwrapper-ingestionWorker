@@ -1,4 +1,4 @@
-// src/ingestion/prompt.ts
+// src/inference/prompt.ts
 
 type BuildSlashPromptOpts = {
     conversationContext: string;
