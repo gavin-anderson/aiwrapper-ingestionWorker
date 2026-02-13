@@ -4,8 +4,8 @@ import { requiredEnv } from "../inference/config.js";
 
 export const pool = new Pool({
     connectionString: requiredEnv("DATABASE_URL"),
-    max: parseInt(process.env.PG_POOL_MAX ?? "10", 10),
-    idleTimeoutMillis: parseInt(process.env.PG_IDLE_TIMEOUT_MS ?? "30000", 10),
-    connectionTimeoutMillis: parseInt(process.env.PG_CONN_TIMEOUT_MS ?? "5000", 10),
+    max: 10,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
     // ssl: { rejectUnauthorized: false },
 })

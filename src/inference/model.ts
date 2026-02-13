@@ -5,9 +5,9 @@ import { truncate } from "./utils.js";
 import { buildSlashPrompt } from "./prompt.js";
 
 const PRIMARY_MODEL = process.env.OPENAI_MODEL ?? "gpt-5";
-const FALLBACK_MODEL = process.env.OPENAI_FALLBACK_MODEL ?? "gpt-5-mini";
+const FALLBACK_MODEL = "gpt-5-mini";
 
-const MAX_REPLY_CHARS = parseInt(process.env.MAX_REPLY_CHARS ?? "1200", 10);
+const MAX_REPLY_CHARS = 1200;
 
 export async function callModel(opts: {
     conversationId: string;
