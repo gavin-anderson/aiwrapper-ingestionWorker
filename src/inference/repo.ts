@@ -1,16 +1,16 @@
-// src/ingestion/repo.ts
+// src/inference/repo.ts
 import type { PoolClient } from "pg";
-import type { ConversationRow, InboundMessageRow, InsertOutboundParams, ReplyJobRow, OutboundMessageRow, TimelineRow } from "./types.js";
+import type { ConversationRow, InboundMessageRow, InsertOutboundParams, InferenceJob, OutboundMessageRow, TimelineRow } from "./types.js";
 
-export async function claimReplyJobs(client: PoolClient, args: {
+export async function claimJobs(client: PoolClient, args: {
     staleLockSeconds: number;
     workerId: string;
-}): Promise<ReplyJobRow[]> {
-    // Step 1: Claim the first eligible job
+}): Promise<InferenceJob[]> {
+    // Step 1: Claim the first eligible inbound message
     const firstQuery = `
     WITH candidate AS (
       SELECT id
-      FROM reply_jobs
+      FROM inbound_messages
       WHERE
         (
           status IN ('queued','failed')
@@ -22,31 +22,30 @@ export async function claimReplyJobs(client: PoolClient, args: {
           AND locked_at IS NOT NULL
           AND locked_at < now() - ($1::int * interval '1 second')
         )
-      ORDER BY run_after ASC, created_at ASC
+      ORDER BY run_after ASC, received_at ASC
       FOR UPDATE SKIP LOCKED
       LIMIT 1
     )
-    UPDATE reply_jobs j
+    UPDATE inbound_messages j
     SET
       status = 'processing',
       locked_at = now(),
-      locked_by = $2,
-      updated_at = now()
+      locked_by = $2
     FROM candidate
     WHERE j.id = candidate.id
     RETURNING
-      j.id, j.conversation_id, j.inbound_message_id, j.status,
+      j.id, j.conversation_id, j.status,
       j.attempts, j.max_attempts, j.run_after, j.locked_at, j.locked_by, j.last_error
   `;
-    const firstRes = await client.query<ReplyJobRow>(firstQuery, [args.staleLockSeconds, args.workerId]);
+    const firstRes = await client.query<InferenceJob>(firstQuery, [args.staleLockSeconds, args.workerId]);
     const firstJob = firstRes.rows[0];
     if (!firstJob) return [];
 
-    // Step 2: Claim all other eligible jobs for the same conversation
+    // Step 2: Claim all other eligible inbound messages for the same conversation
     const batchQuery = `
     WITH candidates AS (
       SELECT id
-      FROM reply_jobs
+      FROM inbound_messages
       WHERE
         conversation_id = $3
         AND id != $4
@@ -64,19 +63,18 @@ export async function claimReplyJobs(client: PoolClient, args: {
         )
       FOR UPDATE SKIP LOCKED
     )
-    UPDATE reply_jobs j
+    UPDATE inbound_messages j
     SET
       status = 'processing',
       locked_at = now(),
-      locked_by = $2,
-      updated_at = now()
+      locked_by = $2
     FROM candidates
     WHERE j.id = candidates.id
     RETURNING
-      j.id, j.conversation_id, j.inbound_message_id, j.status,
+      j.id, j.conversation_id, j.status,
       j.attempts, j.max_attempts, j.run_after, j.locked_at, j.locked_by, j.last_error
   `;
-    const batchRes = await client.query<ReplyJobRow>(batchQuery, [
+    const batchRes = await client.query<InferenceJob>(batchQuery, [
         args.staleLockSeconds,
         args.workerId,
         firstJob.conversation_id,
@@ -119,18 +117,17 @@ export async function insertOutboundMessage(
     const res = await client.query<{ id: string }>(
         `
     INSERT INTO outbound_messages (
-      conversation_id, inbound_message_id, reply_job_id,
+      conversation_id, inbound_message_id,
       provider, to_address, from_address, body,
       status, provider_inbound_sid, sequence_number
     )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,'pending', $8, $9)
+    VALUES ($1,$2,$3,$4,$5,$6,'pending', $7, $8)
     ON CONFLICT (inbound_message_id, sequence_number) DO NOTHING
     RETURNING id
     `,
         [
             params.conversationId,
             params.inboundMessageId,
-            params.replyJobId,
             params.provider,
             params.toAddress,
             params.fromAddress,
@@ -142,24 +139,24 @@ export async function insertOutboundMessage(
     return res.rows[0]?.id ?? null;
 }
 
-export async function markReplyJobsSucceeded(client: PoolClient, jobIds: string[]) {
+export async function markJobsSucceeded(client: PoolClient, jobIds: string[]) {
     await client.query(
         `
-    UPDATE reply_jobs
+    UPDATE inbound_messages
     SET
       status = 'succeeded',
       locked_at = NULL,
       locked_by = NULL,
       last_error = NULL,
-      updated_at = now()
+      inferenced_at = now()
     WHERE id = ANY($1)
     `,
         [jobIds]
     );
 }
 
-export async function markReplyJobsFailedOrDeadletter(client: PoolClient, args: {
-    jobs: ReplyJobRow[];
+export async function markJobsFailed(client: PoolClient, args: {
+    jobs: InferenceJob[];
     isDead: boolean;
     delaySeconds: number;
     lastError: string;
@@ -168,7 +165,7 @@ export async function markReplyJobsFailedOrDeadletter(client: PoolClient, args: 
         const attemptsAfter = job.attempts + 1;
         await client.query(
             `
-      UPDATE reply_jobs
+      UPDATE inbound_messages
       SET
         attempts = $2,
         status = CASE WHEN $3 THEN 'deadletter' ELSE 'failed' END,
@@ -178,8 +175,7 @@ export async function markReplyJobsFailedOrDeadletter(client: PoolClient, args: 
         END,
         last_error = $5,
         locked_at = NULL,
-        locked_by = NULL,
-        updated_at = now()
+        locked_by = NULL
       WHERE id = $1
       `,
             [job.id, attemptsAfter, args.isDead, args.delaySeconds, args.lastError]
@@ -189,9 +185,6 @@ export async function markReplyJobsFailedOrDeadletter(client: PoolClient, args: 
 
 
 function renderTranscript(rows: TimelineRow[]): string {
-    // Keep this simple since your prompt logic is “context blob scanning”
-    // and you said “ignore roles”. We’ll just label direction.
-    // If you want different labels, change "USER"/"JAY" here.
     return rows
         .map((r) => {
             const who = r.direction === "inbound" ? "USER" : "JAY";
@@ -230,7 +223,6 @@ export async function loadTranscriptForConversation(
     );
 
     // 3) outbound to the user
-    // IMPORTANT: replace created_at with your real column if different
     const outboundRes = await client.query<OutboundMessageRow>(
         `
       SELECT id, conversation_id, body, from_address, to_address, provider, created_at

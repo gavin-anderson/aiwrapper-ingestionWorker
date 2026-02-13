@@ -1,1 +1,1 @@
-worker: node dist/src/ingestion/ingestionWorker.js
+worker: node dist/src/inference/inferenceWorker.js

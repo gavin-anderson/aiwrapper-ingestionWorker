@@ -1,11 +1,10 @@
-// src/ingestion/types.ts
-export type ReplyJobStatus = "queued" | "processing" | "succeeded" | "failed" | "deadletter";
+// src/inference/types.ts
+export type JobStatus = "queued" | "processing" | "succeeded" | "failed" | "deadletter";
 
-export type ReplyJobRow = {
+export type InferenceJob = {
     id: string;
     conversation_id: string;
-    inbound_message_id: string;
-    status: ReplyJobStatus;
+    status: JobStatus;
     attempts: number;
     max_attempts: number;
     run_after: string;
@@ -52,7 +51,6 @@ export type ConversationRow = {
 export type InsertOutboundParams = {
     conversationId: string;
     inboundMessageId: string;
-    replyJobId: string;
     provider: string;
     toAddress: string;
     fromAddress: string;
