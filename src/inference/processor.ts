@@ -2,7 +2,7 @@
 import { pool } from "../db/pool.js";
 import type { InferenceJob } from "./types.js";
 import { callModel } from "./model.js";
-import { NO_REPLY_SENTINEL } from "./prompt.js";
+import { getNoReplySentinel, getPromptVersion } from "../prompts/index.js";
 import { insertOutboundMessage, loadConversation, loadInboundMessage, markJobsSucceeded, loadTranscriptForConversation } from "./queries.js";
 import { CONFIG } from "./config.js";
 
@@ -28,7 +28,7 @@ export async function runInference(jobs: InferenceJob[]): Promise<{
     }
 
     // --- MODEL PHASE ---
-    const replyText = await callModel({
+    const { reply: replyText, model } = await callModel({
         conversationId: lastJob.conversation_id,
         inboundProviderSid: inbound.provider_message_sid,
         timeoutMs: CONFIG.MODEL_TIMEOUT_MS,
@@ -36,7 +36,9 @@ export async function runInference(jobs: InferenceJob[]): Promise<{
     });
 
     // --- WRITE PHASE (transaction) ---
-    const noReply = replyText.trim() === NO_REPLY_SENTINEL;
+    const noReplySentinel = await getNoReplySentinel();
+    const prompt_version = getPromptVersion();
+    const noReply = replyText.trim() === noReplySentinel;
     const jobIds = jobs.map(j => j.id);
 
     const client2 = await pool.connect();
@@ -61,6 +63,8 @@ export async function runInference(jobs: InferenceJob[]): Promise<{
                     body: segments[i],
                     provider_inbound_sid: inbound.provider_message_sid,
                     sequenceNumber: i,
+                    prompt_version,
+                    model,
                 });
                 if (id) insertedOutboundIds.push(id);
             }

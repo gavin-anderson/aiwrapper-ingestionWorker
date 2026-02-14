@@ -2,12 +2,17 @@
 import { getOpenAIClient } from "../clients/openaiClient.js";
 import { withRetry } from "../utils/retry.js";
 import { truncate } from "./utils.js";
-import { buildSlashPrompt } from "./prompt.js";
+import { buildSlashPrompt } from "../prompts/index.js";
 
 const PRIMARY_MODEL = process.env.OPENAI_MODEL ?? "gpt-5";
 const FALLBACK_MODEL = "gpt-5-mini";
 
 const MAX_REPLY_CHARS = 1200;
+
+export type ModelResult = {
+    reply: string;
+    model: string;
+};
 
 export async function callModel(opts: {
     conversationId: string;
@@ -15,14 +20,13 @@ export async function callModel(opts: {
     timeoutMs: number;
     fromAddress?: string;
     conversationContext?: string;
-}): Promise<string> {
+}): Promise<ModelResult> {
     const context = String(opts.conversationContext ?? "").trim();
-    if (!context) return "Send me a message and I’ll reply.";
+    if (!context) return { reply: "Send me a message and I'll reply.", model: "none" };
 
     const client = getOpenAIClient();
 
-    // ✅ prompt builder lives in prompt.ts
-    const { instructions, input } = buildSlashPrompt({ conversationContext: context });
+    const { instructions, input } = await buildSlashPrompt({ conversationContext: context });
 
     const callOpenAI = (model: string, signal?: AbortSignal) =>
         client.responses.create(
@@ -52,9 +56,10 @@ export async function callModel(opts: {
         );
 
         let reply = response?.output_text?.trim();
-        if (!reply) return "I didn’t catch that — try again?";
+        if (!reply) return { reply: "I didn't catch that — try again?", model: PRIMARY_MODEL };
 
-        return reply.length > MAX_REPLY_CHARS ? reply.slice(0, MAX_REPLY_CHARS) + "…" : reply;
+        reply = reply.length > MAX_REPLY_CHARS ? reply.slice(0, MAX_REPLY_CHARS) + "…" : reply;
+        return { reply, model: PRIMARY_MODEL };
     } catch (err: any) {
         const status = err?.status ?? err?.response?.status;
 
@@ -65,9 +70,10 @@ export async function callModel(opts: {
             );
 
             let reply = response?.output_text?.trim();
-            if (!reply) return "I didn’t catch that — try again?";
+            if (!reply) return { reply: "I didn't catch that — try again?", model: FALLBACK_MODEL };
 
-            return reply.length > MAX_REPLY_CHARS ? reply.slice(0, MAX_REPLY_CHARS) + "…" : reply;
+            reply = reply.length > MAX_REPLY_CHARS ? reply.slice(0, MAX_REPLY_CHARS) + "…" : reply;
+            return { reply, model: FALLBACK_MODEL };
         }
 
         console.error(
@@ -75,6 +81,6 @@ export async function callModel(opts: {
             truncate(err?.stack || err?.message || String(err), 1500)
         );
 
-        return "I’m a bit jammed up right now — try again in a minute.";
+        return { reply: "I'm a bit jammed up right now — try again in a minute.", model: "error" };
     }
 }

@@ -57,4 +57,6 @@ export type InsertOutboundParams = {
     body: string;
     provider_inbound_sid: string | null;
     sequenceNumber: number;
+    prompt_version: string;
+    model: string;
 };
