@@ -47,9 +47,9 @@ export async function runInference(jobs: InferenceJob[]): Promise<{
 
         const insertedOutboundIds: string[] = [];
         if (!noReply) {
-            // Split on tab or double-newline
+            // Split on tab or newline(s)
             const segments = replyText
-                .split(/\t|\n\n/)
+                .split(/\t|\n+/)
                 .map(s => s.trim())
                 .filter(s => s.length > 0);
 
